@@ -1,6 +1,6 @@
 # Varyetal2023_ICES_JMS
 Relevant code and data sources used to compose the manuscript:
-***Temperature-dependent spawning behavior and larval thermohaline associations of Bering Sea groundfishes*** by Laura Vary, Lauren Rogers,<sup>1<sup/>, Michael Harte<sup>2</sup>, Rebecca Howard<sup>3</sup>, and Lorenzo Ciannelli<sup>3</sup>. 
+***Temperature-dependent spawning behavior and larval thermohaline associations of Bering Sea groundfishes*** by Laura Vary, Lauren Rogers,<sup>1</sup>, Michael Harte<sup>2</sup>, Rebecca Howard<sup>3</sup>, and Lorenzo Ciannelli<sup>3</sup>. 
 
 *Corresponding Author:* 
 Laura Vary, M.Sc. Oregon State University Marine Resource Management program, Corvallis, OR, 97331. 
