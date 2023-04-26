@@ -1,7 +1,7 @@
 #Preamble: 
 The following code was used to transform ichthyoplankton data from its initial raw format to a format useable for our analyses. Comments are included to provide context on the rationale for operations. The following code applies specifically to Flathead sole, but the following operations were used for all species and life stages with occasional noted customizations. This code was conducted on R version 4.2.2 (2022-10-31). 
 
-##Step 1. Obtain the raw dataset ("BS_FlatheadEggCatch.csv") from NOAA partners and load into R environment. 
+###Obtain the raw dataset ("BS_FlatheadEggCatch.csv") from NOAA partners and load into R environment. 
 fheggraw<-read.csv(file='BS_FlatheadEggCatch.csv',header=TRUE,check.names=TRUE)
 fhlarvraw<-read.csv(file='BS_FlatheadLarvaeCatch.csv',header=TRUE,check.names=TRUE)
 
