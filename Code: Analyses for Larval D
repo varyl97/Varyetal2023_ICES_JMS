@@ -1,0 +1,176 @@
+#Preamble: 
+The following code was applied to larval data for all larval species to understand the association between larval catch, sea surface temperature, and sea surface salinity. Though the following code applies to Flathead sole, all larval species were evaluated according to this procedure. 
+
+###Load larval data and trim temporally (based on histogram of catches by day of year) and spatially (include stations within 30km of sampling stations that have documented non-zero catches of larvae). 
+fhlarv.ctd<-read.csv(file='Cleaned_Cut_FhLarv_wCTD.csv',header=TRUE,check.names=TRUE)
+
+fhlarv.ctd<-subset(fhlarv.ctd,doy>99&doy<175)
+for(i in 1:nrow(fhlarv.ctd)){
+  fhlarv.ctd$dist[i]<-min(distance.function(fhlarv.ctd$lat[i],fhlarv.ctd$lon[i],
+                                            fhlarv.ctd$lat[fhlarv.ctd$Cper10m2>0],
+                                            fhlarv.ctd$lon[fhlarv.ctd$Cper10m2>0]))}
+
+fhlarv.ctd<-fhlarv.ctd[fhlarv.ctd#dist<30000,]
+
+###Generate generalized additive models (GAMs) to understand the association between larvae, sea surface temperature (SST), and sea surface salinity (SSS). The other covariates are: larval catch per 10m2 (Cper10m2), year, day of year (doy), longitude (lon), latitude (lat), and bottom depth. 
+
+###Begin with the base model, with only space and time covariates: 
+lv.base<-gam((Cper10m2+1)~factor(year)+s(doy,k=7)+s(lon,lat)+
+               s(bottom_depth,k=5),
+             data=fhlarv.ctd,family=tw(link='log'),method='REML')
+
+###The next model includes space and time covariates + sea surface salinity: 
+lv.add.sal<-gam((Cper10m2+1)~factor(year)+s(doy,k=7)+s(lon,lat)+
+                  s(bottom_depth,k=5)+
+                  s(salinity,k=4),data=fhlarv.ctd,family=tw(link='log'),
+                method='REML')
+
+###The next model includes space and time covariates + sea surface temperature: 
+lv.add.temp<-gam((Cper10m2+1)~factor(year)+s(doy,k=7)+s(lon,lat)+
+                   s(bottom_depth,k=5)+
+                   s(temperature,k=4),data=fhlarv.ctd,family=tw(link='log'),
+                 method='REML')
+             
+###The next model includes space and time covariates + sea surface salinity + sea surface temperature: 
+lv.temp.sal<-gam((Cper10m2+1)~factor(year)+s(doy,k=7)+s(lon,lat)+
+                   s(bottom_depth,k=5)+
+                   s(temperature,k=4)+s(salinity,k=4),data=fhlarv.ctd,
+                 family=tw(link='log'),method='REML')
+
+###The next model includes space and time covariates + interacting (two dimensional) sea surface salinity and sea surface temperature:
+lv.2d<-gam((Cper10m2+1)~factor(year)+s(lon,lat)+s(doy,k=7)+s(bottom_depth)+
+             te(salinity,temperature,k=4),data=fhlarv.ctd,family=tw(link='log'),
+           method='REML')
+
+###Then, compare the models' fit to the data by Akaike Information Criterion scores. 
+aic.base<-AIC(lv.base)
+aic.sal<-AIC(lv.add.sal)
+aic.temp<-AIC(lv.add.temp)
+aic.saltemp<-AIC(lv.temp.sal)
+aic.2d<-AIC(lv.2d)
+
+aic.fhlarv<-data.frame('model'=c('Base','Add Sal','Add Temp',
+                                'Sal and Temp','2-d Sal-Temp'),
+                      'AIC_value'=c(aic.base,aic.sal,aic.temp,
+                                    aic.saltemp,aic.2d))
+
+quartz()
+par(mai=c(1,1,0.5,0.9))
+plot(c(1:5),aic.fhlarv$AIC_value,main='FHS',
+     col=hcl.colors(5,"Teal"),
+     pch=19,cex=2,ylab='AIC Score',xlab='')
+grid(nx=5,ny=14,col="lightgray")
+text(c(1:5),aic.fhlarv$AIC_value,labels=round(aic.fhlarv$AIC_value),pos=c(4,1,3,2,2))
+legend("bottomleft",legend=c('Base','Add. SSS','Add. SST',
+                             'Add. SSS, SST','Bivariate SSS-SST'),
+       col=hcl.colors(5,"Teal"),
+       lwd=3,lty=1,cex=0.7)
+       
+###Then, visualize the best performing model's prediction of average larval biogeography in the study region. Include an argument to overlay observed larval catch. 
+nlat=120
+nlon=120
+latd=seq(min(fhlarv.ctd$lat,na.rm=TRUE),max(fhlarv.ctd$lat,na.rm=TRUE),length.out=nlat)
+lond=seq(min(fhlarv.ctd$lon,na.rm=TRUE),max(fhlarv.ctd$lon,na.rm=TRUE),length.out=nlon)
+
+grid.extent<-expand.grid(lond,latd)
+names(grid.extent)<-c('lon','lat')
+
+grid.extent$dist<-NA
+for(k in 1:nrow(grid.extent)){
+  dist<-distance.function(grid.extent$lat[k],grid.extent$lon[k],
+                          fhlarv.ctd$lat,fhlarv.ctd$lon)
+  grid.extent$dist[k]<-min(dist)
+}
+
+grid.extent$year<-as.numeric(2016)
+grid.extent$doy<-as.numeric(median(fhlarv.ctd$doy,na.rm=TRUE))
+grid.extent$bottom_depth<-NA
+grid.extent$bottom_depth<-as.numeric(median(fhlarv.ctd$bottom_depth,na.rm=TRUE))
+grid.extent$temperature<-as.numeric(mean(fhlarv.ctd$temperature))
+grid.extent$salinity<-as.numeric(mean(fhlarv.ctd$salinity))
+grid.extent$pred<-predict(lv.2d,newdata=grid.extent) 
+grid.extent$pred[grid.extent$dist>30000]<-NA  
+
+quartz()
+par(mai=c(1,1,0.5,0.9))
+image.plot(lond,latd,t(matrix(grid.extent$pred,nrow=length(latd),
+                              ncol=length(lond),byrow=T)),col=hcl.colors(100,"Lajolla"),
+           ylab=expression(paste("Latitude ("^0,')')),xlab=expression(paste("Longitude ("^0,')')),
+           xlim=c(-180,-155),ylim=c(52,63),
+           main='',
+           cex.main=1,cex.lab=1,cex.axis=0.9,legend.line=-2,
+           legend.lab=expression(paste("log(C/(10m"^2,')+1)')),legend.shrink=0.3)
+symbols(fhlarv.ctd$lon[fhlarv.ctd$Cper10m2>0],
+        fhlarv.ctd$lat[fhlarv.ctd$Cper10m2>0],
+        circles=log(fhlarv.ctd$Cper10m2+1)[fhlarv.ctd$Cper10m2>0],
+        inches=0.1,bg=col,fg=NA,add=T)          
+contour(bathy,levels=-c(50,200),labcex=0.4,col='grey28',add=T)
+map("worldHires",fill=T,col="gainsboro",add=T)
+box(lty="solid")
+
+###Plot the best performing model's prediction of larval phenology by day of year. 
+quartz()
+par(mai=c(1,1,0.6,0.9))
+plot(lv.2d,select=2,shade=T,seWithMean=TRUE,shade.col="lightgrey",
+     xlab="Day of Year",ylab="Day of Year Effect")
+abline(h=0,col="mistyrose4",lty=2,lwd=1.3)
+
+###The following code uses the best performing model to predict larval catch on a plot of sea surface salinity by sea surface temperature in greyscale (all predictions) and color (the top 65% highest predictions, i.e., where "most" of the larvae were predicted to occur). 
+ntemp<-100
+nsal<-100
+tempd<-seq(min(fhlarv.ctd$temperature,na.rm=TRUE),max(fhlarv.ctd$temperature,na.rm=TRUE),length.out=ntemp)
+sald<-seq(min(fhlarv.ctd$salinity,na.rm=T),max(fhlarv.ctd$salinity,na.rm=T),length.out=nsal)
+
+grid.extent<-expand.grid(sald,tempd)
+names(grid.extent)<-c('salinity','temperature')
+
+grid.extent$dist<-NA
+for(k in 1:nrow(grid.extent)){
+  dist<-euclidean.distance(grid.extent$salinity[k],grid.extent$temperature[k],
+                           fhlarv.ctd$salinity,fhlarv.ctd$temperature)
+  grid.extent$dist[k]<-min(dist)
+}
+
+grid.extent$year<-as.numeric(2005)
+grid.extent$lon<-as.numeric(median(fhlarv.ctd$lon))
+grid.extent$lat<-as.numeric(median(fhlarv.ctd$lat))
+grid.extent$doy<-as.numeric(median(fhlarv.ctd$doy,na.rm=TRUE))
+grid.extent$bottom_depth<-NA
+grid.extent$bottom_depth<-as.numeric(median(fhlarv.ctd$bottom_depth,na.rm=TRUE))
+grid.extent$pred<-predict(lv.2d,newdata=grid.extent)
+grid.extent$pred[grid.extent$dist>mean(grid.extent$dist)]<-NA
+
+range(grid.extent$pred,na.rm=T) #to know the baseline 
+sum<-sum(grid.extent$pred,na.rm=T)
+clip60<-0.65*sum
+
+print(sum);print(clip60)
+
+grid.extent.ts<-grid.extent
+grid.extent.ts$pos<-seq.int(nrow(grid.extent.ts)) #note the initial position of each row
+grid.extent.ts<-grid.extent.ts%>%arrange(desc(pred)) #mutate to arrange by prediction, from highest to lowest
+head(grid.extent.ts) #check
+grid.extent.ts$sums<-cumsum(grid.extent.ts$pred) #calculate cumulative sum 
+grid.extent.ts$pred[grid.extent.ts$sums>clip60]<-NA #replace any rows beneath the 60% sum value with NAs
+
+grid.extent.ts<-grid.extent.ts%>%arrange(pos) #rearrange back to initial order 
+head(grid.extent.ts) #check 
+range(grid.extent.ts$pred,na.rm=T) #should be a range with higher low-end value than initially - works!
+
+ 
+quartz(width=5,height=5.25);par(mai=c(1,1,0.5,0.5))
+image.plot(sald,tempd,t(matrix(grid.extent$pred,nrow=length(tempd),ncol=length(sald),byrow=T)),
+           col=hcl.colors(100,"Grays",rev=T),xlab='Salinity (psu)',
+           ylab=expression(paste("Temperature ("^0, 'C)')),
+           xlim=c(29,33.5),ylim=c(-1.8,14),
+           main='',
+           cex.main=1,cex.lab=1,cex.axis=0.9,legend.line=-2,
+           legend.lab=expression(paste("log(C/(10m"^2,')+1)')),legend.shrink=0.3)
+image.plot(sald,tempd,t(matrix(grid.extent.ts$pred,nrow=length(tempd),ncol=length(sald),byrow=T)),add=T,
+           col=hcl.colors(100,"Viridis"),xlab='Salinity (psu)',
+           ylab=expression(paste("Temperature ("^0, 'C)')),
+           xlim=c(29,33.5),ylim=c(-1.8,14),
+           main='',
+           cex.main=1,cex.lab=1,cex.axis=0.9,legend.line=-2,
+           legend.lab=expression(paste("log(C/(10m"^2,')+1)')),legend.shrink=0.3)
+
