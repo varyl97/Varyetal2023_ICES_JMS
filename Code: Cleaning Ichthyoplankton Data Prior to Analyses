@@ -1,0 +1,136 @@
+#Preamble: 
+The following code was used to transform ichthyoplankton data from its initial raw format to a format useable for our analyses. Comments are included to provide context on the rationale for operations. The following code applies specifically to Flathead sole, but the following operations were used for all species and life stages with occasional noted customizations. This code was conducted on R version 4.2.2 (2022-10-31). 
+
+##Step 1. Obtain the raw dataset ("BS_FlatheadEggCatch.csv") from NOAA partners and load into R environment. 
+fheggraw<-read.csv(file='BS_FlatheadEggCatch.csv',header=TRUE,check.names=TRUE)
+fhlarvraw<-read.csv(file='BS_FlatheadLarvaeCatch.csv',header=TRUE,check.names=TRUE)
+
+###Remove problematic cruise (*a priori* knowledge). 
+fheggraw<-fheggraw[fheggraw$HAUL_ID!='1SS02 81 1 60BON 2',] 
+fhlarvraw<-fhlarvraw[fhlarvraw$HAUL_ID!='1SS02 81 1 60BON 2',]
+
+###Format day of year and develop a unique identifier for each row in the data. 
+fheggraw$doy<-as.numeric(mdy.date(fheggraw$MONTH_,fheggraw$DAY_,1960))
+fhlarvraw$doy<-as.numeric(mdy.date(fhlarvraw$MONTH_,fhlarvraw$DAY_,1960))
+fheggraw$id<-paste(fheggraw$CRUISE,fheggraw$LAT,fheggraw$LON,fheggraw$GMT_DATE_TIME,fheggraw$MESH,sep="_")
+fhlarvraw$id<-paste(fhlarvraw$CRUISE,fhlarvraw$LAT,fhlarvraw$LON,fhlarvraw$GMT_DATE_TIME,fhlarvraw$MESH,sep="_")
+
+###Remove unusable data due to equipment type and remove duplicate data entries (*a priori knowledge*). 
+fheggraw[fheggraw$NET==3,] 
+fhegg_1_2<-fheggraw[fheggraw$NET<3,]
+table(fhegg_1_2$NET)
+tmp<-table(fhegg_1_2$id)
+id_2<-names(tmp)[tmp==2]
+fhegg_1<-fhegg_1_2[fhegg_1_2$NET==1,]
+fhegg_2<-fhegg_1_2[fhegg_1_2$id%in%id_2&fhegg_1_2$NET==1,]
+
+fhegg_1net<-fhegg_1_2[!fhegg_1_2$id%in%id_2,]
+fhegg<-rbind(fhegg_1net,fhegg_2)
+dim(fhegg)
+
+fhlarvraw[fhlarvraw$NET==3,]
+fhlarv_1_2<-fhlarvraw[fhlarvraw$NET<3,]
+tmp<-table(fhlarv_1_2$id)
+id_2<-names(tmp)[tmp==2]
+fhlarv_2<-fhlarv_1_2[fhlarv_1_2$id%in%id_2&fhlarv_1_2$NET==1,]
+
+fhlarv_1net<-fhlarv_1_2[!fhlarv_1_2$id%in%id_2,]
+fhlarvae<-rbind(fhlarv_1net,fhlarv_2)
+dim(fhlarvae)
+
+fhegg<-fhegg[fhegg$PRIMARY_NET=='Y',]
+fhlarvae<-fhlarvae[fhlarvae$PRIMARY_NET=='Y',]
+
+###Add in a column that calculates the distance of that sampling station to the nearest station with non-zero catches of larvae. This was done to ensure that we focused our data on stations that did, at some point, catch ichthyoplankton. 
+fhegg$dist<-NA;fhlarvae$dist<-NA
+for(i in 1:nrow(fhegg)){
+  fhegg$dist[i]<-min(distance.function(fhegg$LAT[i],fhegg$LON[i],fhegg$LAT[fhegg$LARVALCATCHPER10M2>0],fhegg$LON[fhegg$LARVALCATCHPER10M2>0]))
+  fhlarvae$dist[i]<-min(distance.function(fhlarvae$LAT[i], fhlarvae$LON[i], fhlarvae$LAT[fhlarvae$LARVALCATCHPER10M2>0], fhlarvae$LON[fhlarvae$LARVALCATCHPER10M2>0]))
+}
+
+attach(fhlarvae)
+fhlarvae$count<-round(LARVALCATCHPER1000M3*VOLUME_FILTERED/1000,0)
+detach(fhlarvae)
+
+tmp<-table(fhlarvae$YEAR_)
+index<-match(fhlarvae$YEAR_,names(tmp))
+fhlarvae$SS<-as.numeric(tmp[index])
+
+attach(fhegg)
+fhegg$count<-round(LARVALCATCHPER1000M3*VOLUME_FILTERED/1000,0)
+detach(fhegg)
+
+tmp<-table(fhegg$YEAR_)
+index<-match(fhegg$YEAR_,names(tmp))
+fhegg$SS<-as.numeric(tmp[index])
+
+fhegg$DATE<-NULL
+fhegg$DATE<-paste(fhegg$MONTH_,fhegg$DAY_,fhegg$YEAR_,sep="/")
+
+fhlarvae$DATE<-NULL
+fhlarvae$DATE<-paste(fhlarvae$MONTH_,fhlarvae$DAY_,fhlarvae$YEAR_,sep="/")
+
+###Retain only columns required for the impending analyses. 
+fhsub<-fhegg[c('CRUISE','STATION_NAME','HAUL_NAME','GMT_DATE_TIME','HAUL_ID',
+               'LARVALCATCHPER10M2','LARVALCATCHPER1000M3','YEAR_','MONTH_','LAT','LON','doy','VOLUME_FILTERED',
+               'BOTTOM_DEPTH','id','count','SS','DATE')]
+fhsub<-subset(fhsub,doy>99&doy<200)
+fhsub<-subset(fhsub,BOTTOM_DEPTH<221)
+fhsub<-subset(fhsub,LAT<61)
+fhlarvae<-subset(fhlarvae,BOTTOM_DEPTH<221)
+fhlarvae<-subset(fhlarvae,LAT<61)
+fhlarv<-fhlarvae[c('CRUISE','STATION_NAME','HAUL_NAME','GMT_DATE_TIME','HAUL_ID',
+                   'LARVALCATCHPER10M2','LARVALCATCHPER1000M3','YEAR_','MONTH_','LAT','LON','doy','VOLUME_FILTERED',
+                   'BOTTOM_DEPTH','id','count','SS','DATE')]
+
+names(fhsub)<-c('CRUISE','STATION','HAUL','GMT_DATE_TIME','HAUL_ID','Cper10m2',
+                'Cper1000m3','year','month','lat','lon','doy','vol','bottom_depth','id','count','SS','date')
+names(fhlarv)<-c('CRUISE','STATION','HAUL','GMT_DATE_TIME','HAUL_ID','Cper10m2',
+                 'Cper1000m3','year','month','lat','lon','doy','vol','bottom_depth','id','count','SS','date')
+
+###For the larvae only, add in corresponding conductivity-temperature-depth data 
+fhlarv.ctd<-fhlarv
+
+allctd$Link_ID<-NA
+fhlarv.ctd$Link_ID<-NA
+
+allctd$Link_ID<-paste(allctd$Cruise,allctd$Station,allctd$Haul,sep="_") #create new, clean unique identifier
+fhlarv.ctd$Link_ID<-paste(fhlarv.ctd$CRUISE,fhlarv.ctd$STATION,fhlarv.ctd$HAUL,sep="_")
+
+fhlarv.ctd$temperature<-NA
+fhlarv.ctd$salinity<-NA
+fhlarv.ctd$CTD_date<-NA
+fhlarv.ctd$CTD_link<-NA
+fhlarv.ctd$CTD_time<-NA
+
+for(i in 1:nrow(fhlarv.ctd)){
+  tryCatch({
+    idx1.lv<-allctd$Link_ID==fhlarv.ctd$Link_ID[i]
+    ctdcast<-allctd[idx1.lv,]
+    fhlarv.ctd$temperature[i]<-mean(ctdcast$Temperature[ctdcast$Depth<11],na.rm=T)
+    fhlarv.ctd$salinity[i]<-mean(ctdcast$Salinity[ctdcast$Depth<11],na.rm=T)
+    fhlarv.ctd$CTD_date[i]<-unique(ctdcast$Date)
+    fhlarv.ctd$CTD_link[i]<-unique(ctdcast$Link_ID)
+    fhlarv.ctd$CTD_time[i]<-unique(ctdcast$Time)
+  },error=function(e){cat(as.character(print(i)),as.character(fhlarv.ctd$CRUISE[i]),
+                          conditionMessage(e),"\n")})}
+fhlarv.ctd<-fhlarv.ctd[!fhlarv.ctd$temperature=="NaN",]
+
+fhlarv.ctd$date_diff<-NA
+fhlarv.ctd$date<-parse_date_time(fhlarv.ctd$date,orders="mdy")
+fhlarv.ctd$CTD_date<-parse_date_time(fhlarv.ctd$CTD_date,orders="mdy")
+fhlarv.ctd$date_diff<-difftime(fhlarv.ctd$date,fhlarv.ctd$CTD_date,units="hour")
+fhlarv.ctd<-fhlarv.ctd[which(fhlarv.ctd$date_diff>(-6)&fhlarv.ctd$date_diff<6),]
+dim(fhlarv.ctd) 
+
+###For eggs only, add in corresponding regional sea surface temperature index (source: COBE SST dataset). 
+reg.sst<-read.csv('./Environmental Data/Mar_SST_RegionalIndex_NCEP_BS.csv',header=TRUE,check.names=TRUE)
+head(reg.sst) 
+
+for(i in 1:nrow(fhsub)){
+  fhsub$reg.SST[i]<-reg.sst$SST[reg.sst$year==fhsub$year[i]]} 
+
+
+###Save clean files. 
+write.csv(fhsub,'./Ichthyo Data/Cleaned_Cut_FhEggs.csv') 
+write.csv(fhlarv.ctd,'./Ichthyo Data/Cleaned_Cut_FhLarv_wCTD.csv')
