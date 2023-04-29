@@ -1,0 +1,168 @@
+#Preamble: 
+The following code was applied to egg data for all egg species to understand the propensity for spawning behavior (as proxied by egg distributions) flexibility in relation to sea surface temperature. Though the following code applies to Flathead sole, all egg species were evaluated according to this procedure. 
+
+###Load egg data and trim temporally (based on histogram of catches by day of year) and spatially (include stations within 30km of sampling stations that have documented non-zero catches of egg). 
+fhsub$dist<-NA
+
+for(i in 1:nrow(fhsub)){
+  fhsub$dist[i]<-min(distance.function(fhsub$lat[i],fhsub$lon[i],
+                                       fhsub$lat[fhsub$Cper10m2>0],
+                                       fhsub$lon[fhsub$Cper10m2>0]))
+}
+
+fhsub<-fhsub[fhsub$dist<30000,]
+
+###Generate generalized additive models (GAMs) to understand the association between eggs and regional sea surface temperature. The other covariates are: egg catch per 10m2 (Cper10m2), year, day of year (doy), longitude (lon), latitude (lat), and bottom depth. 
+
+###Begin with the base model: 
+eg.base<-gam((Cper10m2+1)~factor(year)+s(lon,lat)+s(doy)+s(bottom_depth,k=5),
+             data=fhsub,family=tw(link='log'),method='REML')
+
+summary(eg.base)
+AIC(eg.base)
+
+###Then construct a variable-coefficient GAM that allows flexibility in geography (this model predicts egg distributions if latitude and longitude are allowed to vary in relation to regional sea surface temperature). 
+vc.geo<-gam((Cper10m2+1)~factor(year)+s(lon,lat)+s(doy)+s(bottom_depth,k=5)+
+              s(lon,lat,by=reg.SST),data=fhsub,family=tw(link='log'),
+            method='REML')
+
+summary(vc.geo)
+AIC(vc.geo)
+
+###Then construct a variable-coefficient GAM that allows flexibility in phenology. 
+vc.pheno<-gam((Cper10m2+1)~factor(year)+s(lon,lat)+s(doy)+s(bottom_depth,k=5)+
+                s(doy,by=reg.SST),data=fhsub,family=tw(link='log'),
+              method='REML')
+
+summary(vc.pheno)
+AIC(vc.pheno)
+
+###Then, construct a threshold GAM that allows flexibility in geography. Flexibility is modelled slightly differently than with the variable-coefficient formulation; in this formulation egg distributions (in space) vary above and below a threshold regional sea surface temperature. 
+
+####First, create a vector of temperatures to test as thresholds: 
+temps<-sort(unique(reg.sst$SST))
+bd<-4
+temps.in<-temps[bd:(length(temps)-bd)]
+
+####Then, create a for loop that systematically tests the performance of each unique temperature threshold. This code results in a model that uses a temperature threshold that leads to the best performance of the model. 
+aic.geo<-NA*(temps.in)
+thr.geo<-as.list(1:(length(temps.in)))
+
+for(i in 1:length(temps.in)){
+  fhsub$th<-factor(fhsub$reg.SST<=temps.in[i])
+  thr.geo[[i]]<-gam((Cper10m2+1)~factor(year)+s(doy)+s(bottom_depth,k=5)+
+                      s(lon,lat,by=th),data=fhsub,
+                    family=tw(link='log'),method='REML')
+  aic.geo[i]<-AIC(thr.geo[[i]])
+}
+
+best.index.geo<-order(aic.geo)[1]
+thr.geo<-thr.geo[[best.index.geo]]
+
+summary(thr.geo)
+AIC(thr.geo)
+
+###Then, do the same operation to create a threshold GAM where phenology is modelled differently above and below a threshold regional temperature. 
+temps<-sort(unique(reg.sst$SST))
+bd<-4
+temps.in<-temps[bd:(length(temps)-bd)]
+
+aic.pheno<-NA*(temps.in)
+thr.pheno<-as.list(1:(length(temps.in)))
+
+for(i in 1:length(temps.in)){
+  fhsub$th<-factor(fhsub$reg.SST<=temps.in[i])
+  thr.pheno[[i]]<-gam((Cper10m2+1)~factor(year)+
+                        s(lon,lat)+
+                        s(bottom_depth,k=5)+
+                        s(doy,by=th),
+                      data=fhsub,family=tw(link='log'),method='REML')
+  aic.pheno[i]<-AIC(thr.pheno[[i]])
+}
+
+best.index.phe<-order(aic.pheno)[1]
+thr.pheno<-thr.pheno[[best.index.phe]]
+
+summary(thr.pheno)
+AIC(thr.pheno)
+
+###Based on AIC scores, we can identify the best performing model (lowest AIC score). We can also visualize this on a figure: 
+aic.base<-AIC(eg.base)
+aic.thrph<-AIC(thr.pheno)
+aic.thrge<-AIC(thr.geo)
+aic.vcph<-AIC(vc.pheno)
+aic.vcgeo<-AIC(vc.geo)
+
+aic.fhegg<-data.frame('model'=c('Base','Threshold Pheno','Threshold Geo',
+                                'VC Pheno','VC Geo'),
+                      'AIC_value'=c(aic.base,aic.thrph,aic.thrge,
+                                    aic.vcph,aic.vcgeo))
+                                    
+plot(c(1:5),aic.fhegg$AIC_value,main='FHS',
+     col=hcl.colors(5,"Teal"),
+     pch=19,cex=2,ylab='AIC Score',xlab='')
+grid(nx=5,ny=14,col="lightgray")
+text(c(1:5),aic.fhegg$AIC_value,labels=round(aic.fhegg$AIC_value),pos=c(4,3,3,2,2))
+legend("topright",legend=c('Base','Thr. Phenology','Thr. Geography',
+                             'V-C Phenology','V-C Geography'),
+       col=hcl.colors(5,"Teal"),
+       lwd=3,lty=1,cex=0.6)
+                                    
+###For all egg species, this happened to be the threshold GAM formulation. With this formulation, we can first predict egg distributions above and below the threshold (above = warmer conditions, below = cooler conditions) to clarify the modelled impact of temperature on spawning distribution. 
+
+####Create a regularly spaced grid over the study region on which to predict egg catches: 
+nlat=120
+nlon=120
+latd=seq(min(fhsub$lat),max(fhsub$lat),length.out=nlat) #center grid over study region 
+lond=seq(min(fhsub$lon),max(fhsub$lon),length.out=nlon)
+
+grid.extent<-expand.grid(lond,latd)
+names(grid.extent)<-c('lon','lat')
+
+grid.extent$dist<-NA
+for(k in 1:nrow(grid.extent)){
+  dist<-distance.function(grid.extent$lat[k],grid.extent$lon[k],
+                          fhsub$lat,fhsub$lon)
+  grid.extent$dist[k]<-min(dist)
+}
+
+grid.extent$year<-as.numeric(2007)
+grid.extent$doy<-as.numeric(median(fhsub$doy,na.rm=TRUE))
+grid.extent$bottom_depth<-NA
+grid.extent$bottom_depth<-median(fhsub$bottom_depth,na.rm=TRUE)
+grid.extent$reg.SST<-NA
+grid.extent$th<-"TRUE"
+grid.extent$reg.SST<-mean(fhsub$reg.SST[fhsub$reg.SST<temps.in[best.index.geo]],na.rm=TRUE) 
+grid.extent$pred<-predict(thr.geo,newdata=grid.extent)
+grid.extent$pred[grid.extent$dist>30000]<-NA
+grid.extent$th<-"FALSE"
+grid.extent$reg.SST<-mean(fhsub$reg.SST[fhsub$reg.SST>temps.in[best.index.geo]],na.rm=T)
+grid.extent$pred2<-predict(thr.geo,newdata=grid.extent)
+grid.extent$pred2[grid.extent$dist>30000]<-NA
+
+####Plot predictions below and above the threshold temperature: 
+quartz()
+par(mai=c(1,1,0.5,0.9),mfrow=c(1,2))
+image.plot(lond,latd,t(matrix(grid.extent$pred,nrow=length(latd),
+                              ncol=length(lond),byrow=T)),col=hcl.colors(100,"Lajolla"),
+           ylab=expression(paste("Latitude ("^0,')')),xlab=expression(paste("Longitude ("^0,')')),
+           xlim=c(-180,-155),ylim=c(52,63),zlim=range(c(grid.extent$pred,grid.extent$pred2),na.rm=T),main="",
+           cex.main=1,cex.lab=1.2,cex.axis=1,legend.line=-1.8,
+           legend.lab=expression(paste("log(C/(10m"^2,')+1)')),legend.shrink=0.4)
+contour(bathy,levels=-c(50,200),labcex=0.4,col='grey28',add=T)
+map("worldHires",fill=T,col="gainsboro",add=T)
+box(lty="solid")
+
+image.plot(lond,latd,t(matrix(grid.extent$pred2,nrow=length(latd),
+                              ncol=length(lond),byrow=T)),col=hcl.colors(100,"Lajolla"),
+           ylab=expression(paste("Latitude ("^0,')')),xlab=expression(paste("Longitude ("^0,')')),
+           xlim=c(-180,-155),ylim=c(52,63),main='',zlim=range(c(grid.extent$pred,grid.extent$pred2),na.rm=T),
+           cex.main=1,cex.lab=1.2,cex.axis=1,legend.line=-1.8,
+           legend.lab=expression(paste("log(C/(10m"^2,')+1)')),legend.shrink=0.4)
+contour(bathy,levels=-c(50,200),labcex=0.4,col='grey28',add=T)
+map("worldHires",fill=T,col="gainsboro",add=T)
+box(lty="solid")
+
+
+
+
